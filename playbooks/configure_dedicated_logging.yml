@@ -1,0 +1,75 @@
+# see also https://access.redhat.com/articles/7132478
+---
+- name: Create a dedicated rsyslog configuration for AAP
+  gather_facts: false
+
+  # expects the groups found in the installation inventory
+  hosts:
+    - automationgateway
+    - automationcontroller
+    - execution_nodes
+    - automationeda
+    - automationhub
+    - automationmetrics
+    - ansiblemcp
+    - redis
+    - database
+
+  vars:
+    aap_container_prefixes:
+      - ansiblemcp
+      - automation-controller
+      - automation-eda
+      - automation-gateway
+      - automation-hub
+      - automation-metrics
+      - pcp
+      - postgresql
+      - receptor
+      - redis
+
+  tasks:
+    - name: Create AAP rsyslog configuration
+      ansible.builtin.copy:
+        content: |
+          # send AAP container logs to dedicated log files
+          {% for container in aap_container_prefixes | sort %}
+          if $programname startswith '{{ container }}' then {
+              action(type="omfile" file="/var/log/ansible-automation-platform/{{ container }}.log")
+              stop
+          }
+          {% endfor %}
+        dest: /etc/rsyslog.d/10-aap.conf
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      notify: restart rsyslog
+
+    - name: Create AAP logrotate configuration
+      ansible.builtin.copy:
+        content: |
+          /var/log/ansible-automation-platform/*.log {
+              missingok
+              compress
+              delaycompress
+              sharedscripts
+              postrotate
+                  /usr/bin/systemctl -s HUP kill rsyslog.service >/dev/null 2>&1 || true
+              endscript
+          }
+        dest: /etc/logrotate.d/aap
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+
+  handlers:
+    - name: restart rsyslog
+      ansible.builtin.systemd:
+        name: rsyslog
+        state: restarted
+      become: true
+
+...
+# vim: ft=yaml.ansible
